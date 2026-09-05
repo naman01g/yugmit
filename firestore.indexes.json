@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {"collectionGroup":"challenges","queryScope":"COLLECTION","fields":[{"fieldPath":"citizenId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"challenges","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"team_invites","queryScope":"COLLECTION","fields":[{"fieldPath":"studentUid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"team_invites","queryScope":"COLLECTION","fields":[{"fieldPath":"teamId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"team_invites","queryScope":"COLLECTION","fields":[{"fieldPath":"teamId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"teams","queryScope":"COLLECTION","fields":[{"fieldPath":"universityId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"teams","queryScope":"COLLECTION","fields":[{"fieldPath":"facultyLeadId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"challenge_reviews","queryScope":"COLLECTION","fields":[{"fieldPath":"challengeId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"users","queryScope":"COLLECTION","fields":[{"fieldPath":"universityId","order":"ASCENDING"},{"fieldPath":"role","order":"ASCENDING"},{"fieldPath":"name","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,528 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // Helper functions
+    // ============================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isGovernment() {
+      return isSignedIn() && getUserRole() == 'government';
+    }
+
+    function isUniversityMember() {
+      return isSignedIn() && getUserRole() in ['university_admin', 'faculty', 'student'];
+    }
+
+    function ownUniversityId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId;
+    }
+
+    // ------------------------------------------------------------
+    // Controlled taxonomy (keep in lock-step with src/lib/taxonomy.ts).
+    // The AI engine and application validation use the same vocabulary,
+    // so no component may invent a domain or tag during normal operation.
+    // ------------------------------------------------------------
+
+    function isApprovedDomain(d) {
+      return d in ['Education', 'Agriculture', 'Healthcare',
+        'Water Management', 'Environment', 'Energy',
+        'Urban Development', 'Accessibility', 'Public Administration',
+        'Rural Livelihoods'];
+    }
+
+    // Union of every approved Level-2 tag across all domains.
+    function isApprovedTag(t) {
+      return t in ['Digital Learning', 'School Infrastructure',
+        'Higher Education', 'Vocational Training', 'Student Support',
+        'Crop Management', 'Irrigation', 'Soil Health',
+        'Agricultural Technology', 'Farmer Support',
+        'Healthcare Access', 'Public Health', 'Telemedicine',
+        'Health Infrastructure', 'Medical Technology',
+        'Drinking Water', 'Water Quality', 'Water Supply',
+        'Irrigation', 'Water Conservation', 'Groundwater',
+        'Waste Management', 'Pollution', 'Biodiversity',
+        'Environmental Monitoring', 'Climate Resilience',
+        'Renewable Energy', 'Energy Access', 'Energy Efficiency',
+        'Rural Electrification', 'Roads', 'Drainage', 'Sanitation',
+        'Public Infrastructure', 'Traffic & Mobility', 'Smart Infrastructure',
+        'Disability Access', 'Assistive Technology',
+        'Accessible Infrastructure', 'Inclusive Services',
+        'Public Services', 'Governance', 'Citizen Services',
+        'Administrative Efficiency', 'Government Infrastructure',
+        'Employment', 'Skill Development', 'Local Entrepreneurship',
+        'Artisan Support', 'Rural Enterprises'];
+    }
+
+    // Gap A: an accepted AI analysis must carry between 2 and 6 tags,
+    // each belonging to the approved vocabulary, valid domains,
+    // a valid urgency level and a valid impact scale.
+    function aiAnalysisValid() {
+      return request.resource.data.primaryDomain is string
+        && isApprovedDomain(request.resource.data.primaryDomain)
+        && (request.resource.data.secondaryDomain == null
+          || (request.resource.data.secondaryDomain is string
+            && isApprovedDomain(request.resource.data.secondaryDomain)))
+        && request.resource.data.tags is list
+        && request.resource.data.tags.size() >= 2
+        && request.resource.data.tags.size() <= 6
+        && request.resource.data.tags.all(t, isApprovedTag(t))
+        && request.resource.data.urgency in ['low', 'medium', 'high']
+        && request.resource.data.impactScale in ['individual', 'household', 'neighborhood', 'village_ward', 'district']
+        && request.resource.data.confidence is number
+        && request.resource.data.confidence >= 0
+        && request.resource.data.confidence <= 1;
+    }
+
+    // ------------------------------------------------------------
+    // Challenge state machine (keep in lock-step with PRODUCT.md and
+    // src/lib/government-review-service.ts VALID_GOVERNMENT_TRANSITIONS).
+    // A government challenge update may only move status across a legal edge.
+    // ------------------------------------------------------------
+
+    function governmentStatusChangeAllowed(oldStatus, newStatus) {
+      return (oldStatus == 'submitted' && newStatus in ['under_review', 'rejected'])
+        || (oldStatus == 'under_review' && newStatus in ['validated', 'rejected', 'merged', 'submitted'])
+        || (oldStatus == 'validated' && newStatus == 'university_matching');
+    }
+
+    // The team may move a challenge from team_formation -> proposal once its
+    // own proposal (proposals/{challengeId}_{universityId}) has been submitted.
+    // Only an active team member or its faculty lead may perform this update,
+    // and only the status field may change.
+    function teamStatusToProposal(challengeId, assignedUniversityId) {
+      return resource.data.status == 'team_formation'
+        && request.resource.data.status == 'proposal'
+        && request.resource.data.assignedUniversityId == resource.data.assignedUniversityId
+        && request.resource.data.citizenId == resource.data.citizenId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt'])
+        && isSignedIn()
+        && (getUserRole() == 'faculty' || getUserRole() == 'student')
+        && get(/databases/$(database)/documents/proposals/$(challengeId + '_' + assignedUniversityId)).data.status == 'submitted'
+        && get(/databases/$(database)/documents/teams/$(challengeId + '_' + assignedUniversityId)).data.status == 'active'
+        && (request.auth.uid == get(/databases/$(database)/documents/teams/$(challengeId + '_' + assignedUniversityId)).data.facultyLeadId
+          || request.auth.uid in get(/databases/$(database)/documents/teams/$(challengeId + '_' + assignedUniversityId)).data.memberIds);
+    }
+
+    // ============================================================
+    // users/{uid} — one document per authenticated user.
+    // Role and UID are immutable after creation.
+    // ============================================================
+
+    match /users/{userId} {
+      // Faculty may list student profiles only within their own university for
+      // team formation; every other profile remains private.
+      allow read: if isOwner(userId)
+        || (isSignedIn() && getUserRole() == 'faculty'
+          && resource.data.role == 'student'
+          && resource.data.universityId == ownUniversityId());
+
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'citizen'
+        && request.resource.data.name is string
+        && request.resource.data.email is string;
+
+      // Update: own document only; whitelisted fields only.
+      // Locked fields: role, uid, universityId, createdAt.
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'email', 'phone', 'updatedAt']);
+
+      // Delete: not allowed.
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // challenges/{challengeId}
+    //
+    // Citizen can create, read own, update limited fields.
+    // Government can read all challenges for review.
+    // ============================================================
+
+    match /challenges/{challengeId} {
+      // Create: authenticated user only.
+      // citizenId must match the authenticated user.
+      // status must be 'submitted'.
+      allow create: if isSignedIn()
+        && request.resource.data.citizenId == request.auth.uid
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.title is string
+        && request.resource.data.description is string;
+
+      // Read: citizen reads own challenges only.
+      // Government reads all challenges.
+      allow read: if isSignedIn() && (
+        resource.data.citizenId == request.auth.uid
+        || isGovernment()
+        || (isUniversityMember() && (
+          resource.data.assignedUniversityId == ownUniversityId()
+          || exists(/databases/$(database)/documents/challenge_matches/$(challengeId + '_' + ownUniversityId()))
+        ))
+      );
+
+      // Update: citizen can update their own challenge, limited fields only.
+      // Citizens cannot change: citizenId, status, assignedUniversityId, createdAt.
+      // Citizens can update: title, description, domain, tags, location, evidence, updatedAt.
+      allow update: if isSignedIn() && (
+        // Citizen updating own challenge — limited fields
+        (resource.data.citizenId == request.auth.uid
+          && request.resource.data.citizenId == resource.data.citizenId
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['title', 'description', 'domain', 'tags', 'location', 'evidence', 'updatedAt']))
+        ||
+        // Government updating any challenge — only legal state-machine edges.
+        // A malicious client cannot jump straight to proposed/proposal/etc.
+        (isGovernment()
+          && request.resource.data.citizenId == resource.data.citizenId
+          && request.resource.data.assignedUniversityId == resource.data.assignedUniversityId
+          && governmentStatusChangeAllowed(resource.data.status, request.resource.data.status)
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt']))
+        ||
+        // University admin accepting a matched challenge —
+        // sets status to team_formation and assigns the challenge to their university
+        // (this is the acceptance gate; only from university_matching/validated)
+        (isSignedIn()
+          && getUserRole() == 'university_admin'
+          && request.resource.data.status == 'team_formation'
+          && request.resource.data.assignedUniversityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId
+          && (resource.data.status == 'university_matching' || resource.data.status == 'validated')
+          && request.resource.data.citizenId == resource.data.citizenId
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'assignedUniversityId', 'updatedAt']))
+        ||
+        // Active team marks its accepted challenge as reaching Proposal once its
+        // proposal is submitted (keeps the citizen/analytics timeline accurate).
+        (teamStatusToProposal(challengeId, resource.data.assignedUniversityId))
+      );
+
+      // Delete: not allowed.
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // challenge_reviews/{reviewId}
+    //
+    // Government creates review comments/decisions.
+    // Only government role can create and read reviews.
+    // ============================================================
+
+    match /challenge_reviews/{reviewId} {
+      // Create: government only
+      allow create: if isGovernment()
+        && request.resource.data.challengeId is string
+        && request.resource.data.action is string
+        && request.resource.data.content is string;
+
+      // Read: government only
+      allow read: if isGovernment();
+
+      // Update/Delete: not allowed (immutable audit trail)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // teams/{teamId}
+    //
+    // Faculty can create teams for their authorized university.
+    // Faculty can read teams they lead.
+    // Students can read teams they are members of.
+    // Government can read all teams.
+    // ============================================================
+
+    match /teams/{teamId} {
+      // Create: faculty only, for their authorized university,
+      // AND only after the challenge has been accepted & assigned to this university.
+      allow create: if isSignedIn()
+        && getUserRole() == 'faculty'
+        && request.resource.data.universityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId
+        && request.resource.data.facultyLeadId == request.auth.uid
+        && request.resource.data.status == 'forming'
+        && request.resource.data.memberIds is list
+        && request.resource.data.memberIds.size() == 0
+        && get(/databases/$(database)/documents/challenges/$(request.resource.data.challengeId)).data.status == 'team_formation'
+        && get(/databases/$(database)/documents/challenges/$(request.resource.data.challengeId)).data.assignedUniversityId == request.resource.data.universityId;
+
+      // Read: faculty reads teams they lead, students read teams they're members of, government reads all
+      allow read: if isSignedIn() && (
+        (getUserRole() == 'faculty'
+          && resource.data.universityId == ownUniversityId())
+        ||
+        (getUserRole() == 'student'
+          && request.auth.uid in resource.data.memberIds)
+        ||
+        isGovernment()
+      );
+
+      // Update: faculty can update their own team (limited fields)
+      allow update: if isSignedIn()
+        && getUserRole() == 'faculty'
+        && resource.data.facultyLeadId == request.auth.uid
+        && request.resource.data.challengeId == resource.data.challengeId
+        && request.resource.data.universityId == resource.data.universityId
+        && request.resource.data.facultyLeadId == resource.data.facultyLeadId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['memberIds', 'status', 'updatedAt']);
+
+      // Delete: not allowed
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // team_invites/{inviteId}
+    //
+    // Faculty can create invitations for their teams.
+    // Students can read their own invitations.
+    // Students can update their own invitation status (accept/decline).
+    // ============================================================
+
+    match /team_invites/{inviteId} {
+      // Create: faculty only, for their own team
+      allow create: if isSignedIn()
+        && getUserRole() == 'faculty'
+        && request.resource.data.sentBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.studentUid is string
+        && request.resource.data.teamId is string
+        && get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.facultyLeadId == request.auth.uid
+        && get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.universityId == ownUniversityId();
+
+      // Read: student reads own invitations, faculty reads invitations they sent
+      allow read: if isSignedIn() && (
+        (getUserRole() == 'student'
+          && resource.data.studentUid == request.auth.uid)
+        ||
+        (getUserRole() == 'faculty'
+          && get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.universityId == ownUniversityId())
+        ||
+        isGovernment()
+      );
+
+      // Update: student can only update their own invitation status
+      // Allowed fields: status, respondedAt only
+      // Cannot change: teamId, studentUid, sentBy, createdAt
+      allow update: if isSignedIn()
+        && getUserRole() == 'student'
+        && resource.data.studentUid == request.auth.uid
+        && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.studentUid == resource.data.studentUid
+        && request.resource.data.sentBy == resource.data.sentBy
+        && request.resource.data.status in ['accepted', 'declined']
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'respondedAt']);
+
+      // Delete: not allowed
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // universities/{universityId}
+    //
+    // Public reference dataset (15 verified universities, src/data/universities.ts).
+    // Readable by all signed-in users; used by matching (Module 06), team
+    // formation naming (Module 07) and government analytics (Module 09).
+    // Write is not exposed to clients — provisioned via Console/emulator seed.
+    // ============================================================
+
+    match /universities/{universityId} {
+      allow read: if isSignedIn();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // challenge_ai_analysis/{challengeId}
+    //
+    // Immutable after creation. Government and signed-in users can read.
+    // Only system can create (client-side for V1).
+    // ============================================================
+
+    match /challenge_ai_analysis/{analysisId} {
+      // Read: signed-in users can read (for review and display)
+      allow read: if isSignedIn();
+
+      // Create (Gap A closed): signed-in creator, analysisId keyed to the
+      // challengeId, taxonomy validated (domains + 2-6 approved tags +
+      // confidence range), and the creator owns the referenced challenge
+      // (or is government). Prevents injecting invalid taxonomy or a
+      // fabricated analysis for another citizen's challenge.
+      allow create: if isSignedIn()
+        && request.resource.data.challengeId == analysisId
+        && aiAnalysisValid()
+        && (get(/databases/$(database)/documents/challenges/$(analysisId)).data.citizenId == request.auth.uid
+          || isGovernment());
+
+      // Update/Delete: not allowed (immutable)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // challenge_matches/{matchId}
+    //
+    // Government creates matches after validation.
+    // University reads only their own matches.
+    // ============================================================
+
+    match /challenge_matches/{matchId} {
+      // Read: government reads all, university reads matches for their ID
+      allow read: if isSignedIn() && (
+        isGovernment()
+        ||
+        (isUniversityMember()
+          && resource.data.universityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId)
+      );
+
+      // Create: government only
+      allow create: if isGovernment()
+        && request.resource.data.challengeId is string
+        && request.resource.data.universityId is string
+        && request.resource.data.score is number;
+
+      // Update: university admin may accept ONLY their own match.
+      // Only the accepted/acceptance metadata fields may be set (idempotent, one-time).
+      allow update: if isSignedIn()
+        && getUserRole() == 'university_admin'
+        && resource.data.universityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId
+        && request.resource.data.challengeId == resource.data.challengeId
+        && request.resource.data.universityId == resource.data.universityId
+        && request.resource.data.score == resource.data.score
+        && resource.data.accepted != true
+        && request.resource.data.accepted == true
+        && request.resource.data.acceptedBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accepted', 'acceptedAt', 'acceptedBy']);
+
+      // Delete: not allowed
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // proposals/{proposalId}
+    //
+    // Authored by active team members/faculty of the owning team.
+    // Only the team's own proposal may be read/edited by that team.
+    // Government reviews submitted proposals but never rewrites authored content.
+    // ============================================================
+
+    match /proposals/{proposalId} {
+      // Helper: current user's role
+      function isFaculty() { return isSignedIn() && getUserRole() == 'faculty'; }
+      function isStudent() { return isSignedIn() && getUserRole() == 'student'; }
+
+      // Helper: the team document this proposal references (via request.resource.data.teamId)
+      function teamCtx() {
+        return get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data;
+      }
+      // Helper: the challenge document this proposal references
+      function challengeCtx() {
+        return get(/databases/$(database)/documents/challenges/$(request.resource.data.challengeId)).data;
+      }
+
+      // Helper: the team document referenced by the existing proposal doc (for reads)
+      function proposedTeam() {
+        return get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data;
+      }
+
+      // Authorized author: faculty lead or accepted member of an ACTIVE team,
+      // team belongs to challenge, and team's university matches challenge's
+      // assigned university.
+      function canAuthorProposal() {
+        return isSignedIn()
+          && (isFaculty() || isStudent())
+          && teamCtx().status == 'active'
+          && teamCtx().challengeId == request.resource.data.challengeId
+          && teamCtx().universityId == request.resource.data.universityId
+          && teamCtx().universityId == challengeCtx().assignedUniversityId
+          && (request.auth.uid == teamCtx().facultyLeadId
+              || request.auth.uid in teamCtx().memberIds);
+      }
+
+      // Read: own team (authorized author) OR government for submitted proposals
+      allow read: if isSignedIn() && (
+        (resource.data.status == 'submitted' || resource.data.status == 'government_review')
+          && isGovernment()
+        ||
+        (
+          (isFaculty() || isStudent())
+          && proposedTeam().status == 'active'
+          && proposedTeam().challengeId == resource.data.challengeId
+          && proposedTeam().universityId == resource.data.universityId
+          && (request.auth.uid == proposedTeam().facultyLeadId
+              || request.auth.uid in proposedTeam().memberIds)
+        )
+      );
+
+      // Create: active team member/faculty may create their team's proposal
+      allow create: if canAuthorProposal()
+        && request.resource.data.teamId == proposalId
+        && request.resource.data.status == 'draft'
+        && request.resource.data.title is string
+        && request.resource.data.challengeId is string
+        && request.resource.data.universityId is string;
+
+      // Update: two allowed paths.
+      // (A) TEAM submitting/editing their own DRAFT: may change authored content,
+      //     status draft->submitted, and submittedAt. Identity fields immutable.
+      // (B) GOVERNMENT reviewing a SUBMITTED proposal: may set review metadata
+      //     and status submitted->government_review, but never authored content.
+      allow update: if isSignedIn() && (
+        (
+          // Path A — team author
+          canAuthorProposal()
+          && request.resource.data.teamId == resource.data.teamId
+          && request.resource.data.challengeId == resource.data.challengeId
+          && request.resource.data.universityId == resource.data.universityId
+          && resource.data.status == 'draft'
+          && request.resource.data.status in ['draft', 'submitted']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'title', 'solutionDescription', 'implementationPlan',
+            'estimatedCost', 'timeline', 'expectedImpact',
+            'status', 'submittedAt', 'updatedAt'
+          ])
+        )
+        ||
+        (
+          // Path B — government review
+          isGovernment()
+          && request.resource.data.teamId == resource.data.teamId
+          && request.resource.data.challengeId == resource.data.challengeId
+          && request.resource.data.universityId == resource.data.universityId
+          && request.resource.data.title == resource.data.title
+          && request.resource.data.solutionDescription == resource.data.solutionDescription
+          && request.resource.data.implementationPlan == resource.data.implementationPlan
+          && request.resource.data.estimatedCost == resource.data.estimatedCost
+          && request.resource.data.timeline == resource.data.timeline
+          && request.resource.data.expectedImpact == resource.data.expectedImpact
+          && resource.data.status == 'submitted'
+          && request.resource.data.status == 'government_review'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'governmentComment', 'reviewedBy', 'reviewedAt', 'updatedAt'
+          ])
+        )
+      );
+
+      // Delete: not allowed (deny by default)
+      allow delete: if false;
+    }
+
+    // All other collections: deny by default (Firestore's implicit rule).
+  }
+}

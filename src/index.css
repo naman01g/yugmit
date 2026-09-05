@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Institutional color palette — calm, trustworthy, non-white surfaces */
+  --background: #f4f5f7;
+  --foreground: #1a202c;
+  --card: #ffffff;
+  --card-foreground: #1a202c;
+  --popover: #ffffff;
+  --popover-foreground: #1a202c;
+  --primary: #1e429f;
+  --primary-foreground: #ffffff;
+  --secondary: #e7ebf2;
+  --secondary-foreground: #243b53;
+  --muted: #eef1f5;
+  --muted-foreground: #5b6b7d;
+  --accent: #dfe7f4;
+  --accent-foreground: #1e3a5f;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --success: #177245;
+  --success-foreground: #ffffff;
+  --warning: #9a6700;
+  --warning-foreground: #ffffff;
+  --border: #d4dae3;
+  --input: #c9d1dc;
+  --ring: #2f5dcf;
+  --radius: 0.5rem;
+
+  /* Typography — deliberate institutional faces (no Inter/Geist/Space Grotesk) */
+  --font-sans:
+    'Noto Sans Devanagari', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-heading:
+    'Noto Serif Devanagari', ui-serif, Georgia, 'Times New Roman', 'Iowan Old Style',
+    serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas,
+    monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+  --font-heading: var(--font-heading);
+  --font-mono: var(--font-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* ============================================================
+   Landing page token scope (YUGMIT front door)
+   Scoped to .landing so the institutional app palette is untouched.
+   Palette: deep charcoal-brown, warm ivory, restrained saffron/amber,
+   deep green, muted neutrals.
+   ============================================================ */
+@layer components {
+  .landing {
+    --landing-ink: #221a14;
+    --landing-ink-soft: #4a3f33;
+    --landing-muted: #6d6153;
+    --landing-ivory: #f7f2e9;
+    --landing-surface: #efe7d8;
+    --landing-line: #d9cdb9;
+    --landing-amber: #a46a1f;
+    --landing-amber-soft: #c98a2e;
+    --landing-green: #30533d;
+    --landing-green-soft: #4a6b52;
+    --landing-coal: #1d1812;
+    --landing-coal-soft: #2a231a;
+    --landing-cream: #fbf6ea;
+    --landing-on-coal: #efe5d2;
+  }
+}
