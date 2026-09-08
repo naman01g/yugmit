@@ -10,6 +10,7 @@ export type ChallengeStatus =
   | 'rejected'
   | 'merged'
   | 'validated'
+  | 'university_assigned'
   | 'university_matching'
   | 'team_formation'
   | 'proposal'
@@ -25,7 +26,7 @@ export const LIFECYCLE_STEPS: {
   { status: 'submitted', label: 'Submitted' },
   { status: 'under_review', label: 'Under Review' },
   { status: 'validated', label: 'Validated' },
-  { status: 'university_matching', label: 'University Matching' },
+  { status: 'university_assigned', label: 'University Assigned' },
   { status: 'team_formation', label: 'Team Formation' },
   { status: 'proposal', label: 'Proposal' },
 ]
@@ -56,6 +57,13 @@ export interface Challenge {
   evidence: string[]
   status: ChallengeStatus
   assignedUniversityId?: string
+  assignedUniversityName?: string
+  assignedAt?: number
+  assignedBy?: string
+  assignmentStatus?: 'pending' | 'accepted' | 'declined'
+  matchingStatus?: 'not_run' | 'completed'
+  /** AI may signal concern, but only Government owns this decision field. */
+  spamStatus?: 'none' | 'confirmed'
   createdAt: number
   updatedAt: number
 }

@@ -263,6 +263,7 @@ export function statusLabel(status: ChallengeStatus): string {
     rejected: 'Rejected',
     merged: 'Merged',
     validated: 'Validated',
+    university_assigned: 'University Assigned',
     university_matching: 'University Matching',
     team_formation: 'Team Formation',
     proposal: 'Proposal',

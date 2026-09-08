@@ -23,8 +23,7 @@ import type {
   AiAnalysisResult,
   ChallengeSubmission,
 } from '@/types/ai'
-import { isGeminiConfigured, sendGeminiPrompt } from '@/lib/gemini-client'
-import { buildAnalysisPrompt } from '@/lib/ai-prompt'
+import { isAiGatewayConfigured, requestAiAnalysis } from '@/lib/ai-gateway-client'
 import { parseGeminiResponse } from '@/lib/ai-parser'
 import { validateAiAnalysis } from '@/lib/ai-validator'
 
@@ -68,16 +67,14 @@ function logStageDurations(stages: Record<string, number>, resultCode: string): 
 export async function analyzeChallenge(
   submission: ChallengeSubmission,
 ): Promise<AiAnalysisResult> {
-  if (!isGeminiConfigured()) {
+  if (!isAiGatewayConfigured()) {
     return {
       ok: false,
       code: 'gemini_not_configured',
       message:
-        'AI analysis is not configured. Set VITE_GEMINI_API_KEY in your .env file.',
+        'AI analysis is not configured. Set VITE_AI_GATEWAY_URL in your .env file.',
     }
   }
-
-  const prompt = buildAnalysisPrompt(submission)
 
   const deadlineController = new AbortController()
   const deadlineTimer = setTimeout(
@@ -88,34 +85,30 @@ export async function analyzeChallenge(
   const t0 = performance.now()
 
   try {
-    const geminiResult = await sendGeminiPrompt(prompt, {
-      signal: deadlineController.signal,
-    })
+    const gatewayResult = await requestAiAnalysis(submission)
     clearTimeout(deadlineTimer)
 
     const geminiDuration = performance.now() - t0
 
-    if (!geminiResult.ok) {
+    if (!gatewayResult.ok) {
       logStageDurations(
         { geminiRequest: geminiDuration },
-        `failed:${geminiResult.code}`,
+        `failed:${gatewayResult.code}`,
       )
       return {
         ok: false,
         code:
-          geminiResult.code === 'not_configured'
+          gatewayResult.code === 'not_configured'
             ? 'gemini_not_configured'
-            : geminiResult.code === 'timeout'
+            : gatewayResult.code === 'timeout'
               ? 'gemini_timeout'
-              : geminiResult.code === 'rate_limit'
-                ? 'rate_limit'
-                : 'gemini_request_failed',
-        message: geminiResult.message,
+              : 'gemini_request_failed',
+        message: gatewayResult.message,
       }
     }
 
     const tParse = performance.now()
-    const parseResult = parseGeminiResponse(geminiResult.text)
+    const parseResult = parseGeminiResponse(gatewayResult.text)
     const parseDuration = performance.now() - tParse
 
     if (!parseResult.ok) {
@@ -172,7 +165,7 @@ export async function analyzeChallenge(
     return {
       ok: true,
       analysis: parseResult.data,
-      rawResponse: geminiResult.text,
+      rawResponse: gatewayResult.text,
     }
   } catch (error) {
     logStageDurations(

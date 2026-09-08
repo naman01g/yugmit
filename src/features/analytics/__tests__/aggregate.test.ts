@@ -71,15 +71,17 @@ describe('Module 09 — analytics aggregation invariants', () => {
       challenge({ id: 'a', status: 'submitted' }),
       challenge({ id: 'b', status: 'under_review' }),
       challenge({ id: 'c', status: 'validated' }),
-      challenge({ id: 'd', status: 'university_matching' }),
-      challenge({ id: 'e', status: 'team_formation' }),
-      challenge({ id: 'f', status: 'proposal' }),
+      challenge({ id: 'd', status: 'university_assigned' }),
+      challenge({ id: 'e', status: 'university_matching' }),
+      challenge({ id: 'f', status: 'team_formation' }),
+      challenge({ id: 'g', status: 'proposal' }),
     ]
     const data = aggregateAnalytics({ ...empty, challenges })
     expect(data.pipeline.map((p) => p.stage)).toEqual([
       'submitted',
       'under_review',
       'validated',
+      'university_assigned',
       'university_matching',
       'team_formation',
       'proposal',

@@ -6,29 +6,34 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Institutional color palette — calm, trustworthy, non-white surfaces */
-  --background: #f4f5f7;
-  --foreground: #1a202c;
-  --card: #ffffff;
-  --card-foreground: #1a202c;
-  --popover: #ffffff;
-  --popover-foreground: #1a202c;
-  --primary: #1e429f;
-  --primary-foreground: #ffffff;
-  --secondary: #e7ebf2;
-  --secondary-foreground: #243b53;
-  --muted: #eef1f5;
-  --muted-foreground: #5b6b7d;
-  --accent: #dfe7f4;
-  --accent-foreground: #1e3a5f;
-  --destructive: #b42318;
-  --destructive-foreground: #ffffff;
-  --success: #177245;
-  --success-foreground: #ffffff;
-  --warning: #9a6700;
-  --warning-foreground: #ffffff;
-  --border: #d4dae3;
-  --input: #c9d1dc;
+  /* YUGMIT institutional palette — warm ivory/surface, deep brown ink,
+     restrained saffron-amber primary, muted green success, warm lines.
+     Mirrors the approved landing visual language for product consistency. */
+  --background: #f7f2e9;
+  --foreground: #221a14;
+  --card: #efe7d8;
+  --card-foreground: #221a14;
+  --popover: #fbf6ea;
+  --popover-foreground: #221a14;
+  --primary: #8a5a17;
+  --primary-foreground: #f7f2e9;
+  --primary-hover: #714811;
+  --primary-active: #5f3d0e;
+  --secondary: #f7f2e9;
+  --secondary-foreground: #2a231a;
+  --secondary-hover: #efe5d2;
+  --muted: #e9dcc3;
+  --muted-foreground: #62584a;
+  --accent: #e0d2b8;
+  --accent-foreground: #221a14;
+  --destructive: #a1442f;
+  --destructive-foreground: #fbf6ea;
+  --success: #30533d;
+  --success-foreground: #f3f0e3;
+  --warning: #8a6419;
+  --warning-foreground: #fbf6ea;
+  --border: #cdbfa8;
+  --input: #beaf96;
   --ring: #2f5dcf;
   --radius: 0.5rem;
 
@@ -53,8 +58,11 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary-hover: var(--secondary-hover);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);

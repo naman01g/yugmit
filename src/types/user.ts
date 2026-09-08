@@ -14,6 +14,8 @@ export interface UserProfile {
   email: string
   phone?: string
   universityId?: string
+  /** Application authorization is independent from Firebase Auth identity. */
+  accountStatus?: 'pending' | 'approved' | 'rejected'
   createdAt: number
   updatedAt: number
 }

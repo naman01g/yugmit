@@ -21,6 +21,7 @@ import {
   updateDoc,
   addDoc,
 } from 'firebase/firestore'
+import { getAuth } from 'firebase/auth'
 
 import { db as firebaseDb, isFirebaseConfigured } from './firebase'
 import type { Challenge, ChallengeStatus } from '@/types/challenge'
@@ -45,9 +46,10 @@ function requireDb(): NonNullable<typeof firebaseDb> {
  * Valid status transitions for government review.
  */
 export const VALID_GOVERNMENT_TRANSITIONS: Record<ChallengeStatus, ChallengeStatus[]> = {
-  submitted: ['under_review', 'rejected'],
+  submitted: ['under_review'],
   under_review: ['validated', 'rejected', 'merged', 'submitted'],
   validated: [],
+  university_assigned: [],
   university_matching: [],
   team_formation: [],
   proposal: [],
@@ -67,9 +69,7 @@ export interface ReviewFilters {
 }
 
 /**
- * Moves a newly submitted challenge into government review.
- * Explicit `submitted -> under_review` transition (PRODUCT.md state machine).
- * A challenge cannot be validated directly from `submitted`.
+ * Explicitly begins Government review of a submitted challenge.
  */
 export async function startReview(
   challengeId: string,
@@ -96,9 +96,7 @@ export async function startReview(
     updatedAt: serverTimestamp(),
   })
 
-  if (comment) {
-    await addReviewComment(challengeId, 'under_review', comment)
-  }
+  await addReviewComment(challengeId, 'under_review', comment || 'Government review started.')
 }
 
 /**
@@ -137,9 +135,16 @@ export async function getReviewChallenges(
       domain: data.domain as Domain,
       tags: data.tags as string[],
       location: data.location,
-      evidence: data.evidence as string[],
+      evidence: Array.isArray(data.evidence)
+        ? data.evidence.filter((value): value is string => typeof value === 'string')
+        : [],
       status: data.status as ChallengeStatus,
       assignedUniversityId: data.assignedUniversityId as string | undefined,
+      assignedUniversityName: data.assignedUniversityName as string | undefined,
+      assignedBy: data.assignedBy as string | undefined,
+      assignmentStatus: data.assignmentStatus as Challenge['assignmentStatus'],
+      matchingStatus: data.matchingStatus as Challenge['matchingStatus'],
+      spamStatus: data.spamStatus === 'confirmed' ? 'confirmed' as const : 'none' as const,
       createdAt:
         data.createdAt instanceof Timestamp
           ? data.createdAt.toMillis()
@@ -188,9 +193,16 @@ export async function getChallengeForReview(
     domain: data.domain as Domain,
     tags: data.tags as string[],
     location: data.location,
-    evidence: data.evidence as string[],
+    evidence: Array.isArray(data.evidence)
+      ? data.evidence.filter((value): value is string => typeof value === 'string')
+      : [],
     status: data.status as ChallengeStatus,
     assignedUniversityId: data.assignedUniversityId as string | undefined,
+    assignedUniversityName: data.assignedUniversityName as string | undefined,
+    assignedBy: data.assignedBy as string | undefined,
+    assignmentStatus: data.assignmentStatus as Challenge['assignmentStatus'],
+    matchingStatus: data.matchingStatus as Challenge['matchingStatus'],
+    spamStatus: data.spamStatus === 'confirmed' ? 'confirmed' : 'none',
     createdAt:
       data.createdAt instanceof Timestamp
         ? data.createdAt.toMillis()
@@ -248,10 +260,7 @@ export async function validateChallenge(
     updatedAt: serverTimestamp(),
   })
 
-  // Add audit comment
-  if (comment) {
-    await addReviewComment(challengeId, 'validated', comment)
-  }
+  await addReviewComment(challengeId, 'validated', comment || 'Challenge validated by Government.')
 }
 
 /**
@@ -404,6 +413,34 @@ export async function linkRelatedChallenge(
   )
 }
 
+/** Records a Government spam decision without changing lifecycle state. */
+export async function setSpamStatus(
+  challengeId: string,
+  spamStatus: 'none' | 'confirmed',
+  reason: string,
+): Promise<void> {
+  if (!reason.trim()) throw { code: 'validation-error', message: 'A reason is required.' }
+  const db = requireDb()
+  const challengeRef = doc(db, 'challenges', challengeId)
+  const snapshot = await getDoc(challengeRef)
+  if (!snapshot.exists()) throw { code: 'not-found', message: 'Challenge not found.' }
+  await updateDoc(challengeRef, { spamStatus, updatedAt: serverTimestamp() })
+  await addReviewComment(challengeId, spamStatus === 'confirmed' ? 'marked_spam' : 'spam_restored', reason)
+}
+
+/** Records the human decision not to merge a presented duplicate candidate. */
+export async function keepChallengesSeparate(
+  challengeId: string,
+  candidateId: string,
+  reason: string,
+): Promise<void> {
+  if (!candidateId.trim() || !reason.trim()) throw { code: 'validation-error', message: 'Candidate and reason are required.' }
+  const db = requireDb()
+  const candidate = await getDoc(doc(db, 'challenges', candidateId))
+  if (!candidate.exists()) throw { code: 'not-found', message: 'Candidate challenge not found.' }
+  await addReviewComment(challengeId, 'kept_separate', `Kept separate from ${candidateId}. ${reason}`)
+}
+
 /**
  * Adds a review comment to a challenge.
  */
@@ -417,6 +454,7 @@ async function addReviewComment(
     challengeId,
     action,
     content,
+    reviewerId: getAuth().currentUser?.uid ?? null,
     createdAt: serverTimestamp(),
   })
 }

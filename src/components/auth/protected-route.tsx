@@ -62,6 +62,24 @@ export function ProtectedRoute({ persona }: ProtectedRouteProps) {
     )
   }
 
+  if (
+    persona === 'university' &&
+    (userProfile.accountStatus !== 'approved' || !userProfile.universityId)
+  ) {
+    return (
+      <PageContainer className="py-12">
+        <ErrorState
+          title="Account approval required"
+          message={userProfile.accountStatus === 'rejected'
+            ? 'This institutional account was not approved.'
+            : 'Your university account is awaiting institutional verification.'}
+          actionLabel="Sign out"
+          onAction={() => void logout()}
+        />
+      </PageContainer>
+    )
+  }
+
   const userPersona = getPersonaForRole(userProfile.role)
   if (!userPersona || userPersona !== persona) {
     return <Navigate to="/login" replace />

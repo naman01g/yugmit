@@ -3,15 +3,15 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { analyzeChallenge, needsReviewerAttention } from '@/features/ai/services/ai-analysis-service'
 import type { AiAnalysisOutput, ChallengeSubmission } from '@/types/ai'
 
-// Mock the Gemini client so no live calls are made and no API key is needed.
-vi.mock('@/lib/gemini-client', () => ({
-  isGeminiConfigured: vi.fn(() => true),
-  sendGeminiPrompt: vi.fn(),
+// Mock the authenticated gateway so no live provider calls are made.
+vi.mock('@/lib/ai-gateway-client', () => ({
+  isAiGatewayConfigured: vi.fn(() => true),
+  requestAiAnalysis: vi.fn(),
 }))
 
-import { isGeminiConfigured, sendGeminiPrompt } from '@/lib/gemini-client'
+import { isAiGatewayConfigured, requestAiAnalysis } from '@/lib/ai-gateway-client'
 
-const sendGeminiPromptMock = vi.mocked(sendGeminiPrompt)
+const requestAiAnalysisMock = vi.mocked(requestAiAnalysis)
 
 const VALID_OUTPUT: AiAnalysisOutput = {
   primaryDomain: 'Agriculture',
@@ -36,18 +36,18 @@ const SUBMISSION: ChallengeSubmission = {
   location: { district: 'Ranchi' },
 }
 
-describe('analyzeChallenge — deterministic with mocked Gemini client', () => {
+describe('analyzeChallenge — deterministic with mocked AI gateway', () => {
   beforeEach(() => {
-    vi.mocked(isGeminiConfigured).mockReturnValue(true)
-    sendGeminiPromptMock.mockReset()
+    vi.mocked(isAiGatewayConfigured).mockReturnValue(true)
+    requestAiAnalysisMock.mockReset()
   })
 
   afterEach(() => {
     vi.clearAllMocks()
   })
 
-  it('returns success for a valid Gemini response', async () => {
-    sendGeminiPromptMock.mockResolvedValueOnce({ ok: true, text: VALID_TEXT })
+  it('returns success for a valid gateway response', async () => {
+    requestAiAnalysisMock.mockResolvedValueOnce({ ok: true, text: VALID_TEXT })
 
     const result = await analyzeChallenge(SUBMISSION)
     expect(result.ok).toBe(true)
@@ -58,34 +58,34 @@ describe('analyzeChallenge — deterministic with mocked Gemini client', () => {
     }
   })
 
-  it('returns not_configured when Gemini is not configured', async () => {
-    vi.mocked(isGeminiConfigured).mockReturnValue(false)
+  it('returns not_configured when the gateway is not configured', async () => {
+    vi.mocked(isAiGatewayConfigured).mockReturnValue(false)
 
     const result = await analyzeChallenge(SUBMISSION)
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.code).toBe('gemini_not_configured')
     }
-    expect(sendGeminiPromptMock).not.toHaveBeenCalled()
+    expect(requestAiAnalysisMock).not.toHaveBeenCalled()
   })
 
   it('fails gracefully on rate limit and does not retry', async () => {
-    sendGeminiPromptMock.mockResolvedValueOnce({
+    requestAiAnalysisMock.mockResolvedValueOnce({
       ok: false,
-      code: 'rate_limit',
+      code: 'request_failed',
       message: 'rate limited',
     })
 
     const result = await analyzeChallenge(SUBMISSION)
     expect(result.ok).toBe(false)
     if (!result.ok) {
-      expect(result.code).toBe('rate_limit')
+      expect(result.code).toBe('gemini_request_failed')
     }
-    expect(sendGeminiPromptMock).toHaveBeenCalledTimes(1)
+    expect(requestAiAnalysisMock).toHaveBeenCalledTimes(1)
   })
 
   it('fails gracefully on invalid JSON output', async () => {
-    sendGeminiPromptMock.mockResolvedValueOnce({
+    requestAiAnalysisMock.mockResolvedValueOnce({
       ok: true,
       text: 'this is not json',
     })
@@ -95,12 +95,12 @@ describe('analyzeChallenge — deterministic with mocked Gemini client', () => {
     if (!result.ok) {
       expect(result.code).toBe('invalid_json')
     }
-    expect(sendGeminiPromptMock).toHaveBeenCalledTimes(1) // no retry on invalid JSON
+    expect(requestAiAnalysisMock).toHaveBeenCalledTimes(1) // no retry on invalid JSON
   })
 
   it('fails on schema validation failure', async () => {
     const bad = { ...VALID_OUTPUT, primaryDomain: 'Rocket Science' }
-    sendGeminiPromptMock.mockResolvedValueOnce({
+    requestAiAnalysisMock.mockResolvedValueOnce({
       ok: true,
       text: JSON.stringify(bad),
     })
@@ -111,7 +111,7 @@ describe('analyzeChallenge — deterministic with mocked Gemini client', () => {
       expect(result.code).toBe('validation_failed')
     }
     // malformed output is not retried indefinitely
-    expect(sendGeminiPromptMock).toHaveBeenCalledTimes(1)
+    expect(requestAiAnalysisMock).toHaveBeenCalledTimes(1)
   })
 
   it('treats missing required fields as validation_failed', async () => {
@@ -119,7 +119,7 @@ describe('analyzeChallenge — deterministic with mocked Gemini client', () => {
       primaryDomain: 'Agriculture',
       tags: ['Crop Management', 'Irrigation'],
     })
-    sendGeminiPromptMock.mockResolvedValueOnce({ ok: true, text: partial })
+    requestAiAnalysisMock.mockResolvedValueOnce({ ok: true, text: partial })
 
     const result = await analyzeChallenge(SUBMISSION)
     expect(result.ok).toBe(false)

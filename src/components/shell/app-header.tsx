@@ -2,6 +2,7 @@ import { useAuth } from '@/context/auth-context'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { MenuIcon } from '@/components/ui/icons'
+import { YugmitBrand } from './yugmit-brand'
 
 interface AppHeaderProps {
   title: string
@@ -36,14 +37,7 @@ export function AppHeader({ title, personaLabel, onOpenSidebar }: AppHeaderProps
           </Button>
         ) : null}
 
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-sm font-semibold">{title}</span>
-          {personaLabel ? (
-            <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-              / {personaLabel}
-            </span>
-          ) : null}
-        </div>
+        {title === 'YUGMIT' ? <YugmitBrand label={personaLabel} /> : <div className="flex min-w-0 items-baseline gap-2"><YugmitBrand /><span className="hidden truncate text-xs text-muted-foreground sm:inline">/ {title}</span></div>}
 
         <div className="ml-auto flex items-center gap-3">
           {userProfile ? (

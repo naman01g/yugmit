@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/feedback/loading-state'
 import { EmptyState } from '@/components/feedback/empty-state'
-import { getCitizenChallenges } from '@/lib/challenge-service'
+import { challengeEvidenceCount, getCitizenChallenges } from '@/lib/challenge-service'
 import type { Challenge, ChallengeStatus } from '@/types/challenge'
 
 function formatDate(ms: number): string {
@@ -21,6 +21,7 @@ const STATUS_LABEL: Record<ChallengeStatus, string> = {
   submitted: 'Submitted',
   under_review: 'Under Review',
   validated: 'Validated',
+  university_assigned: 'University Assigned',
   university_matching: 'University Matching',
   team_formation: 'Team Formation',
   proposal: 'Proposal',
@@ -110,7 +111,7 @@ export function CitizenOverviewPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-1 py-5">
             <span className="text-3xl font-semibold">
-              {challenges.filter((c) => c.evidence.length > 0).length}
+              {challenges.filter((c) => challengeEvidenceCount(c) > 0).length}
             </span>
             <span className="text-sm text-muted-foreground">
               With Evidence

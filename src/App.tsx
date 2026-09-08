@@ -24,6 +24,8 @@ import { UniversityTeamPage } from '@/features/university/pages/team-page'
 import { UniversityProposalPage } from '@/features/university/pages/proposal-page'
 import { TeamFormationPage } from '@/features/university/pages/team-formation-page'
 import { InvitationsPage } from '@/features/university/pages/invitations-page'
+import { UniversityAccountsPage } from '@/features/government/pages/university-accounts-page'
+import { StudentVerificationPage } from '@/features/university/pages/student-verification-page'
 
 const router = createBrowserRouter([
   { path: '/', element: <LandingPage /> },
@@ -75,6 +77,7 @@ const router = createBrowserRouter([
             path: '/government/analytics',
             element: <GovernmentAnalyticsPage />,
           },
+          { path: '/government/university-accounts', element: <UniversityAccountsPage /> },
         ],
       },
     ],
@@ -103,6 +106,7 @@ const router = createBrowserRouter([
             path: '/university/invitations',
             element: <InvitationsPage />,
           },
+          { path: '/university/student-verification', element: <StudentVerificationPage /> },
           {
             path: '/university/proposals/:id',
             element: <UniversityProposalPage />,

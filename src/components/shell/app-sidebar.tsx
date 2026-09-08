@@ -1,8 +1,12 @@
 import type { ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { cn } from '@/lib/utils'
-import { personaNavigation, type PersonaNavConfig } from '@/config/navigation'
+import {
+  activeNavItemId,
+  personaNavigation,
+  type PersonaNavConfig,
+} from '@/config/navigation'
 import type { Persona } from '@/types'
 
 interface SidebarNavProps {
@@ -11,6 +15,9 @@ interface SidebarNavProps {
 }
 
 function SidebarNav({ config, footer }: SidebarNavProps) {
+  const { pathname } = useLocation()
+  const activeItemId = activeNavItemId(config, pathname)
+
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 py-4">
@@ -23,21 +30,19 @@ function SidebarNav({ config, footer }: SidebarNavProps) {
         className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-4"
       >
         {config.items.map((item) => (
-          <NavLink
+          <Link
             key={item.id}
             to={item.href}
-            end={item.href === config.homeHref}
-            className={({ isActive }) =>
-              cn(
-                'flex flex-col gap-0.5 rounded-md px-3 py-2 text-sm transition-colors',
-                isActive
-                  ? 'bg-accent font-medium text-accent-foreground'
-                  : 'text-foreground/80 hover:bg-muted hover:text-foreground',
-              )
-            }
+            aria-current={activeItemId === item.id ? 'page' : undefined}
+            className={cn(
+              'flex flex-col gap-0.5 rounded-md px-3 py-2 text-sm transition-colors',
+              item.id === activeItemId
+                ? 'bg-accent font-medium text-accent-foreground'
+                : 'text-foreground/80 hover:bg-muted hover:text-foreground',
+            )}
           >
             {item.label}
-          </NavLink>
+          </Link>
         ))}
       </nav>
       {footer ? <div className="px-4 pb-4">{footer}</div> : null}

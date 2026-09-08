@@ -4,12 +4,13 @@ import { VALID_GOVERNMENT_TRANSITIONS, type ReviewFilters } from '../government-
 import type { ChallengeStatus } from '@/types/challenge'
 
 describe('government review — status transitions', () => {
-  it('allows moving submitted to under_review', () => {
+  it('allows Government to start review from submitted', () => {
     expect(VALID_GOVERNMENT_TRANSITIONS.submitted).toContain('under_review')
   })
 
-  it('allows rejecting a submitted challenge', () => {
-    expect(VALID_GOVERNMENT_TRANSITIONS.submitted).toContain('rejected')
+  it('does not allow final decisions before review starts', () => {
+    expect(VALID_GOVERNMENT_TRANSITIONS.submitted).not.toContain('validated')
+    expect(VALID_GOVERNMENT_TRANSITIONS.submitted).not.toContain('rejected')
   })
 
   it('allows validating an under_review challenge', () => {
@@ -26,10 +27,6 @@ describe('government review — status transitions', () => {
 
   it('allows merging an under_review challenge', () => {
     expect(VALID_GOVERNMENT_TRANSITIONS.under_review).toContain('merged')
-  })
-
-  it('does not allow validating directly from submitted (must go through under_review)', () => {
-    expect(VALID_GOVERNMENT_TRANSITIONS.submitted).not.toContain('validated')
   })
 
   it('does not allow merging a submitted challenge directly', () => {
@@ -91,5 +88,10 @@ describe('government review — decision requirements', () => {
   it('does not require comment for validation', () => {
     const comment = undefined
     expect(comment).toBeUndefined()
+  })
+
+  it('keeps spam outside the lifecycle state machine', () => {
+    const statuses = Object.values(VALID_GOVERNMENT_TRANSITIONS).flat()
+    expect(statuses).not.toContain('spam')
   })
 })

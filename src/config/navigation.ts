@@ -15,6 +15,22 @@ export interface PersonaNavConfig {
   items: NavItem[]
 }
 
+/**
+ * Selects exactly one sidebar item: the longest route prefix wins.
+ * This keeps parent detail routes active without also activating a more
+ * specific sibling such as /citizen/challenges/new.
+ */
+export function activeNavItemId(
+  config: PersonaNavConfig,
+  pathname: string,
+): string | null {
+  const matches = config.items.filter(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  )
+  matches.sort((a, b) => b.href.length - a.href.length)
+  return matches[0]?.id ?? null
+}
+
 const citizenNav: PersonaNavConfig = {
   persona: 'citizen',
   label: 'Citizen',
@@ -72,6 +88,12 @@ const governmentNav: PersonaNavConfig = {
       href: '/government/analytics',
       description: 'Workflow visibility and statistics',
     },
+    {
+      id: 'government-university-accounts',
+      label: 'University Accounts',
+      href: '/government/university-accounts',
+      description: 'Approve institutional administrator accounts',
+    },
   ],
 }
 
@@ -98,6 +120,12 @@ const universityNav: PersonaNavConfig = {
       label: 'My Invitations',
       href: '/university/invitations',
       description: 'Team invitations sent to you',
+    },
+    {
+      id: 'university-student-verification',
+      label: 'Student Verification',
+      href: '/university/student-verification',
+      description: 'Verify pending students for your university',
     },
   ],
 }

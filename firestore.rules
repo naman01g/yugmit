@@ -24,11 +24,29 @@ service cloud.firestore {
     }
 
     function isUniversityMember() {
-      return isSignedIn() && getUserRole() in ['university_admin', 'faculty', 'student'];
+      return isSignedIn()
+        && getUserRole() in ['university_admin', 'faculty', 'student']
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountStatus == 'approved'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId is string;
+    }
+
+    function isApprovedUniversityAdmin() {
+      return isUniversityMember() && getUserRole() == 'university_admin';
     }
 
     function ownUniversityId() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId;
+    }
+
+    // Compares a field across two data maps without erroring when the field is
+    // absent in either map. Firestore rules throw
+    // ("Property <x> is undefined on object") when a missing map key is
+    // dereferenced, which aborts rule evaluation and silently denials valid
+    // requests (e.g. challenges before team_formation have no
+    // `assignedUniversityId`). This predicates on presence first, then value.
+    function fieldUnchanged(oldMap, newMap, field) {
+      return (field in newMap) == (field in oldMap)
+        && (!(field in oldMap) || newMap[field] == oldMap[field]);
     }
 
     // ------------------------------------------------------------
@@ -45,8 +63,10 @@ service cloud.firestore {
     }
 
     // Union of every approved Level-2 tag across all domains.
-    function isApprovedTag(t) {
-      return t in ['Digital Learning', 'School Infrastructure',
+    // (Returned as a list so rules can do a set-membership check via
+    // hasOnly()/toSet(); the rules language has no lambda/iterator methods.)
+    function approvedTags() {
+      return ['Digital Learning', 'School Infrastructure',
         'Higher Education', 'Vocational Training', 'Student Support',
         'Crop Management', 'Irrigation', 'Soil Health',
         'Agricultural Technology', 'Farmer Support',
@@ -79,7 +99,8 @@ service cloud.firestore {
         && request.resource.data.tags is list
         && request.resource.data.tags.size() >= 2
         && request.resource.data.tags.size() <= 6
-        && request.resource.data.tags.all(t, isApprovedTag(t))
+        && request.resource.data.tags.hasOnly(approvedTags())
+        && request.resource.data.tags.toSet().size() == request.resource.data.tags.size()
         && request.resource.data.urgency in ['low', 'medium', 'high']
         && request.resource.data.impactScale in ['individual', 'household', 'neighborhood', 'village_ward', 'district']
         && request.resource.data.confidence is number
@@ -94,19 +115,21 @@ service cloud.firestore {
     // ------------------------------------------------------------
 
     function governmentStatusChangeAllowed(oldStatus, newStatus) {
-      return (oldStatus == 'submitted' && newStatus in ['under_review', 'rejected'])
+      return (oldStatus == 'submitted' && newStatus == 'under_review')
         || (oldStatus == 'under_review' && newStatus in ['validated', 'rejected', 'merged', 'submitted'])
-        || (oldStatus == 'validated' && newStatus == 'university_matching');
+        || (oldStatus == 'validated' && newStatus == 'university_assigned');
     }
 
     // The team may move a challenge from team_formation -> proposal once its
     // own proposal (proposals/{challengeId}_{universityId}) has been submitted.
     // Only an active team member or its faculty lead may perform this update,
     // and only the status field may change.
-    function teamStatusToProposal(challengeId, assignedUniversityId) {
+    function teamStatusToProposal(challengeId) {
+      let assignedUniversityId = 'assignedUniversityId' in resource.data
+        ? resource.data.assignedUniversityId : '';
       return resource.data.status == 'team_formation'
         && request.resource.data.status == 'proposal'
-        && request.resource.data.assignedUniversityId == resource.data.assignedUniversityId
+        && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityId')
         && request.resource.data.citizenId == resource.data.citizenId
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['status', 'updatedAt'])
@@ -126,7 +149,11 @@ service cloud.firestore {
     match /users/{userId} {
       // Faculty may list student profiles only within their own university for
       // team formation; every other profile remains private.
-      allow read: if isOwner(userId)
+      allow read: if isOwner(userId) || isGovernment()
+        || (isApprovedUniversityAdmin()
+          && resource.data.role == 'student'
+          && resource.data.accountStatus == 'pending'
+          && resource.data.universityId == ownUniversityId())
         || (isSignedIn() && getUserRole() == 'faculty'
           && resource.data.role == 'student'
           && resource.data.universityId == ownUniversityId());
@@ -137,11 +164,45 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.email is string;
 
+      // A self-registering student may request one canonical university, but
+      // cannot self-approve or create another role.
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'student'
+        && request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.universityId is string
+        && request.resource.data.accountStatus == 'pending';
+
       // Update: own document only; whitelisted fields only.
       // Locked fields: role, uid, universityId, createdAt.
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['name', 'email', 'phone', 'updatedAt']);
+
+      // Government alone approves/rejects university-admin accounts. It may
+      // not rewrite their canonical institution or role.
+      allow update: if isGovernment()
+        && resource.data.role == 'university_admin'
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.universityId == resource.data.universityId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountStatus', 'updatedAt'])
+        && request.resource.data.accountStatus in ['approved', 'rejected'];
+
+      // An approved university admin can decide only pending students tied to
+      // the same stored universityId.
+      allow update: if isApprovedUniversityAdmin()
+        && resource.data.role == 'student'
+        && resource.data.accountStatus == 'pending'
+        && resource.data.universityId == ownUniversityId()
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.universityId == resource.data.universityId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountStatus', 'updatedAt'])
+        && request.resource.data.accountStatus in ['approved', 'rejected'];
 
       // Delete: not allowed.
       allow delete: if false;
@@ -170,7 +231,8 @@ service cloud.firestore {
         resource.data.citizenId == request.auth.uid
         || isGovernment()
         || (isUniversityMember() && (
-          resource.data.assignedUniversityId == ownUniversityId()
+          ('assignedUniversityId' in resource.data
+            && resource.data.assignedUniversityId == ownUniversityId())
           || exists(/databases/$(database)/documents/challenge_matches/$(challengeId + '_' + ownUniversityId()))
         ))
       );
@@ -188,27 +250,76 @@ service cloud.firestore {
         // Government updating any challenge — only legal state-machine edges.
         // A malicious client cannot jump straight to proposed/proposal/etc.
         (isGovernment()
-          && request.resource.data.citizenId == resource.data.citizenId
-          && request.resource.data.assignedUniversityId == resource.data.assignedUniversityId
+          && fieldUnchanged(resource.data, request.resource.data, 'citizenId')
           && governmentStatusChangeAllowed(resource.data.status, request.resource.data.status)
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'updatedAt']))
+              .hasOnly(['status', 'updatedAt', 'assignedUniversityId', 'assignedUniversityName', 'assignedAt', 'assignedBy', 'assignmentStatus'])
+          && (
+            (request.resource.data.status == 'university_assigned'
+              && request.resource.data.assignedUniversityId is string
+              && request.resource.data.assignedUniversityName is string
+              && request.resource.data.assignedBy == request.auth.uid
+              && request.resource.data.assignmentStatus == 'pending')
+            || (request.resource.data.status != 'university_assigned'
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityId')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityName')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedAt')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignedBy')
+              && fieldUnchanged(resource.data, request.resource.data, 'assignmentStatus'))
+          ))
+        ||
+        // Matching completion is separate from lifecycle state and cannot
+        // alter challenge contents, ownership, or assignment.
+        (isGovernment()
+          && resource.data.status == 'validated'
+          && request.resource.data.status == resource.data.status
+          && fieldUnchanged(resource.data, request.resource.data, 'citizenId')
+          && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityId')
+          && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityName')
+          && request.resource.data.matchingStatus == 'completed'
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['matchingStatus', 'updatedAt']))
+        ||
+        // Spam is a separate, auditable Government decision and never an AI
+        // lifecycle transition.
+        (isGovernment()
+          && request.resource.data.status == resource.data.status
+          && fieldUnchanged(resource.data, request.resource.data, 'citizenId')
+          && request.resource.data.spamStatus in ['none', 'confirmed']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['spamStatus', 'updatedAt']))
         ||
         // University admin accepting a matched challenge —
         // sets status to team_formation and assigns the challenge to their university
-        // (this is the acceptance gate; only from university_matching/validated)
+        // (this is the acceptance gate; only after Government assignment)
         (isSignedIn()
-          && getUserRole() == 'university_admin'
+          && isApprovedUniversityAdmin()
           && request.resource.data.status == 'team_formation'
           && request.resource.data.assignedUniversityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId
-          && (resource.data.status == 'university_matching' || resource.data.status == 'validated')
+          && resource.data.status == 'university_assigned'
+          && resource.data.assignmentStatus == 'pending'
           && request.resource.data.citizenId == resource.data.citizenId
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'assignedUniversityId', 'updatedAt']))
+              .hasOnly(['status', 'assignedUniversityId', 'assignedUniversityName', 'assignmentStatus', 'updatedAt'])
+          && request.resource.data.assignmentStatus == 'accepted')
+        ||
+        // The assigned university may decline exactly once. Government can
+        // then select another institution from the same compatibility run.
+        (isSignedIn()
+          && isApprovedUniversityAdmin()
+          && resource.data.status == 'university_assigned'
+          && resource.data.assignmentStatus == 'pending'
+          && resource.data.assignedUniversityId == ownUniversityId()
+          && request.resource.data.status == 'validated'
+          && request.resource.data.assignmentStatus == 'declined'
+          && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityId')
+          && fieldUnchanged(resource.data, request.resource.data, 'assignedUniversityName')
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'assignmentStatus', 'updatedAt']))
         ||
         // Active team marks its accepted challenge as reaching Proposal once its
         // proposal is submitted (keeps the citizen/analytics timeline accurate).
-        (teamStatusToProposal(challengeId, resource.data.assignedUniversityId))
+        (teamStatusToProposal(challengeId))
       );
 
       // Delete: not allowed.
@@ -350,13 +461,22 @@ service cloud.firestore {
     // ============================================================
     // challenge_ai_analysis/{challengeId}
     //
-    // Immutable after creation. Government and signed-in users can read.
-    // Only system can create (client-side for V1).
+    // Immutable after creation. Read is restricted to users already
+    // authorized for the corresponding challenge: the owning citizen,
+    // government, or a university member of a university that owns the
+    // challenge (or is matched to it). Analysis is NEVER publicly readable.
     // ============================================================
 
     match /challenge_ai_analysis/{analysisId} {
-      // Read: signed-in users can read (for review and display)
-      allow read: if isSignedIn();
+      // Read: authorized only for the referenced challenge.
+      allow read: if isSignedIn() && (
+        get(/databases/$(database)/documents/challenges/$(analysisId)).data.citizenId == request.auth.uid
+        || isGovernment()
+        || (isUniversityMember() && (
+          get(/databases/$(database)/documents/challenges/$(analysisId)).data.assignedUniversityId == ownUniversityId()
+          || exists(/databases/$(database)/documents/challenge_matches/$(analysisId + '_' + ownUniversityId()))
+        ))
+      );
 
       // Create (Gap A closed): signed-in creator, analysisId keyed to the
       // challengeId, taxonomy validated (domains + 2-6 approved tags +
@@ -399,7 +519,7 @@ service cloud.firestore {
       // Update: university admin may accept ONLY their own match.
       // Only the accepted/acceptance metadata fields may be set (idempotent, one-time).
       allow update: if isSignedIn()
-        && getUserRole() == 'university_admin'
+        && isApprovedUniversityAdmin()
         && resource.data.universityId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.universityId
         && request.resource.data.challengeId == resource.data.challengeId
         && request.resource.data.universityId == resource.data.universityId

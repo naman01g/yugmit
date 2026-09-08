@@ -27,19 +27,40 @@ export interface AcceptanceError {
 
 export type UniversityMatch = ChallengeMatch & { accepted: boolean }
 
-/** Lists only the current university's match records. */
+/** Lists only active Government assignments for the current university.
+ * Qualifying routing matches are not invitations and must not be actionable.
+ */
 export async function getUniversityMatches(universityId: string): Promise<UniversityMatch[]> {
   const db = requireDb()
-  const snapshot = await getDocs(query(collection(db, 'challenge_matches'), where('universityId', '==', universityId)))
-  return snapshot.docs.map((d) => {
-    const data = d.data()
+  // Firestore rules are not filters: constrain the first collection query to
+  // the authenticated profile's canonical university before reading anything.
+  // This also avoids touching non-assigned routing matches in the dashboard.
+  const assignedChallenges = await getDocs(query(
+    collection(db, 'challenges'),
+    where('assignedUniversityId', '==', universityId),
+  ))
+  const activeChallengeIds = assignedChallenges.docs
+    .filter((challenge) => ['university_assigned', 'team_formation'].includes(String(challenge.data().status)))
+    .map((challenge) => challenge.id)
+
+  const matches = await Promise.all(activeChallengeIds.map(async (challengeId) => {
+    const snapshot = await getDoc(doc(db, 'challenge_matches', `${challengeId}_${universityId}`))
+    if (!snapshot.exists()) return null
+    const data = snapshot.data()
+    if (data.universityId !== universityId || data.challengeId !== challengeId) return null
     return {
-      challengeId: data.challengeId, universityId: data.universityId, score: data.score,
-      rank: data.rank, factors: data.factors, weightsSnapshot: data.weightsSnapshot,
-      algorithmVersion: data.algorithmVersion, accepted: data.accepted === true,
+      challengeId,
+      universityId,
+      score: data.score,
+      rank: data.rank,
+      factors: data.factors,
+      weightsSnapshot: data.weightsSnapshot,
+      algorithmVersion: data.algorithmVersion,
+      accepted: data.accepted === true,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : typeof data.createdAt === 'number' ? data.createdAt : Date.now(),
-    }
-  })
+    } satisfies UniversityMatch
+  }))
+  return matches.filter((match): match is UniversityMatch => match !== null)
 }
 
 function requireDb(): NonNullable<typeof firebaseDb> {
@@ -196,8 +217,12 @@ export async function acceptMatch(params: {
   const challengeData = challengeDoc.data()
   const challengeStatus = challengeData.status as string
 
-  // Allow acceptance if challenge is in university_matching or validated status
-  if (challengeStatus !== 'university_matching' && challengeStatus !== 'validated') {
+  // Only the university explicitly chosen by Government may accept.
+  if (
+    challengeStatus !== 'university_assigned' ||
+    challengeData.assignedUniversityId !== universityId ||
+    challengeData.assignmentStatus !== 'pending'
+  ) {
     throw {
       code: 'challenge-not-eligible',
       message: `Challenge is in "${challengeStatus}" status and cannot be accepted.`,
@@ -213,8 +238,34 @@ export async function acceptMatch(params: {
 
   // Update challenge with assigned university and status
   await updateDoc(doc(db, 'challenges', challengeId), {
-    assignedUniversityId: universityId,
     status: 'team_formation',
+    assignmentStatus: 'accepted',
+    updatedAt: serverTimestamp(),
+  })
+}
+
+/** Declines the current Government assignment without selecting a replacement. */
+export async function declineAssignment(params: {
+  challengeId: string
+  universityId: string
+  universityAdminUid: string
+}): Promise<void> {
+  const db = requireDb()
+  const { challengeId, universityId, universityAdminUid } = params
+  const userDoc = await getDoc(doc(db, 'users', universityAdminUid))
+  if (!userDoc.exists() || userDoc.data().role !== 'university_admin' || userDoc.data().universityId !== universityId) {
+    throw { code: 'unauthorized', message: 'Only the assigned university administrator can decline.' } satisfies AcceptanceError
+  }
+  const challengeRef = doc(db, 'challenges', challengeId)
+  const challengeDoc = await getDoc(challengeRef)
+  if (!challengeDoc.exists()) throw { code: 'challenge-not-found', message: 'Challenge not found.' } satisfies AcceptanceError
+  const challenge = challengeDoc.data()
+  if (challenge.status !== 'university_assigned' || challenge.assignedUniversityId !== universityId || challenge.assignmentStatus !== 'pending') {
+    throw { code: 'challenge-not-eligible', message: 'This assignment is no longer awaiting your decision.' } satisfies AcceptanceError
+  }
+  await updateDoc(challengeRef, {
+    status: 'validated',
+    assignmentStatus: 'declined',
     updatedAt: serverTimestamp(),
   })
 }

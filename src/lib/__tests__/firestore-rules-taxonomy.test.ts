@@ -38,7 +38,7 @@ const ruleDomains = extractStringsFromArray(
 )
 const ruleTags = extractStringsFromArray(
   rulesSource,
-  /function isApprovedTag\(t\) \{\n      return t in \[(.*?)\];/s,
+  /function approvedTags\(\) \{\n      return \[(.*?)\];/s,
 )
 const rulesUrgency = extractStringsFromArray(
   rulesSource,
@@ -61,7 +61,9 @@ function mirrorsAiAnalysisValid(doc: Record<string, unknown>): boolean {
   }
   if (!Array.isArray(doc['tags'])) return false
   if (doc['tags'].length < 2 || doc['tags'].length > 6) return false
-  if (!doc['tags'].every((t) => typeof t === 'string' && isApprovedTag(t))) {
+  if (doc['tags'].some((t) => typeof t !== 'string')) return false
+  if (new Set(doc['tags'] as string[]).size !== doc['tags'].length) return false
+  if (!(doc['tags'] as string[]).every((t) => isApprovedTag(t))) {
     return false
   }
   if (!isUrgency(doc['urgency'])) return false
@@ -111,11 +113,17 @@ describe('firestore.rules ← taxonomy lock-step (drift regression guard)', () =
     expect(rulesImpactScale).toEqual([...ALLOWED_IMPACT_SCALES])
   })
 
-  it('aiAnalysisValid still enforces tag count and confidence bounds', () => {
+  it('aiAnalysisValid still enforces tag count, dedup, and confidence bounds', () => {
     expect(rulesSource).toContain('request.resource.data.tags.size() >= 2')
     expect(rulesSource).toContain('request.resource.data.tags.size() <= 6')
-    expect(rulesSource).toContain('request.resource.data.tags.all(t, isApprovedTag(t))')
+    expect(rulesSource).toContain('request.resource.data.tags.hasOnly(approvedTags())')
+    expect(rulesSource).toContain(
+      'request.resource.data.tags.toSet().size() == request.resource.data.tags.size()',
+    )
     expect(rulesSource).toContain('request.resource.data.confidence <= 1')
+    // Firestore rules has NO lambda/iterator methods — `.all(x, fn)` is invalid
+    // and silently denies every create the moment it is evaluated. Regression guard.
+    expect(rulesSource).not.toMatch(/\.all\(/)
     expect(rulesSource).toMatch(/allow create: if isSignedIn/)
     expect(rulesSource).toMatch(/allow update: if false/)
     expect(rulesSource).toMatch(/allow delete: if false/)
@@ -127,6 +135,29 @@ describe('firestore.rules ← taxonomy lock-step (drift regression guard)', () =
     expect(block?.[0]).toContain(
       'get(/databases/$(database)/documents/challenges/$(analysisId)).data.citizenId == request.auth.uid',
     )
+  })
+
+  it('challenge_ai_analysis read requires authorization for the challenge (no public read)', () => {
+    const block = rulesSource.match(
+      /match \/challenge_ai_analysis\/\{analysisId\}[\s\S]*?\n    \}/,
+    )?.[0]
+    expect(block).toBeDefined()
+    // Citizens may only read analysis for a challenge they own.
+    expect(block).toContain(
+      'get(/databases/$(database)/documents/challenges/$(analysisId)).data.citizenId == request.auth.uid',
+    )
+    // Government may read any authorized analysis.
+    expect(block).toContain('isGovernment()')
+    // University members only for their own (assigned or matched) challenges.
+    expect(block).toContain('isUniversityMember()')
+    expect(block).toContain('assignedUniversityId == ownUniversityId()')
+    expect(block).toContain('challenge_matches/$(analysisId + \'_\' + ownUniversityId())')
+    // The old blanket allow-read-for-every-signed-in-user must not return.
+    expect(block).not.toContain('allow read: if isSignedIn();')
+    // Immutability + ownership gates remain.
+    expect(block).toContain('allow create: if isSignedIn()')
+    expect(block).toContain('allow update: if false;')
+    expect(block).toContain('allow delete: if false;')
   })
 })
 

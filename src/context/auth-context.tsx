@@ -14,6 +14,7 @@ import { auth as firebaseAuth, isFirebaseConfigured } from '@/lib/firebase'
 import {
   loginWithEmailPassword,
   registerCitizen,
+  registerStudent,
   logoutUser,
   fetchUserProfile,
   touchUserTimestamp,
@@ -27,6 +28,7 @@ export interface AuthState {
   profileError: string | null
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, name: string) => Promise<void>
+  registerStudent: (email: string, password: string, name: string, universityId: string) => Promise<void>
   logout: () => Promise<void>
   refreshProfile: () => Promise<void>
 }
@@ -131,6 +133,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [loadProfile],
   )
 
+  const registerStudentRequest = useCallback(
+    async (email: string, password: string, name: string, universityId: string) => {
+      const user = await registerStudent(email, password, name, universityId)
+      setFirebaseUser(user)
+      await loadProfile(user)
+    },
+    [loadProfile],
+  )
+
   const logout = useCallback(async () => {
     await logoutUser()
     setFirebaseUser(null)
@@ -155,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileError: effectiveProfileError,
       login,
       register,
+      registerStudent: registerStudentRequest,
       logout,
       refreshProfile,
     }),
@@ -165,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       effectiveProfileError,
       login,
       register,
+      registerStudentRequest,
       logout,
       refreshProfile,
     ],

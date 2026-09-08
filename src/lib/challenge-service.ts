@@ -28,6 +28,61 @@ export interface ChallengeError {
   message: string
 }
 
+/**
+ * Normalizes the optional legacy Firestore evidence field to the Challenge
+ * contract. New writes always include an array, but older/manual documents may
+ * omit it. Non-string values are not evidence URLs and are ignored.
+ */
+export function normalizeChallengeEvidence(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : []
+}
+
+/** Safe display count for callers receiving a legacy Challenge shape. */
+export function challengeEvidenceCount(challenge: Pick<Challenge, 'evidence'>): number {
+  return Array.isArray(challenge.evidence) ? challenge.evidence.length : 0
+}
+
+/** Maps an untrusted Firestore challenge document into the application model. */
+export function mapChallengeData(
+  id: string,
+  data: Record<string, unknown>,
+): Challenge {
+  return {
+    id,
+    citizenId: data['citizenId'] as string,
+    title: data['title'] as string,
+    description: data['description'] as string,
+    domain: data['domain'] as Domain,
+    tags: data['tags'] as string[],
+    location: data['location'] as Challenge['location'],
+    evidence: normalizeChallengeEvidence(data['evidence']),
+    status: data['status'] as ChallengeStatus,
+    assignedUniversityId: data['assignedUniversityId'] as string | undefined,
+    assignedUniversityName: data['assignedUniversityName'] as string | undefined,
+    assignedAt:
+      data['assignedAt'] instanceof Timestamp
+        ? data['assignedAt'].toMillis()
+        : typeof data['assignedAt'] === 'number' ? data['assignedAt'] : undefined,
+    assignedBy: data['assignedBy'] as string | undefined,
+    assignmentStatus: data['assignmentStatus'] as Challenge['assignmentStatus'],
+    matchingStatus: data['matchingStatus'] as Challenge['matchingStatus'],
+    createdAt:
+      data['createdAt'] instanceof Timestamp
+        ? data['createdAt'].toMillis()
+        : typeof data['createdAt'] === 'number'
+          ? data['createdAt']
+          : Date.now(),
+    updatedAt:
+      data['updatedAt'] instanceof Timestamp
+        ? data['updatedAt'].toMillis()
+        : typeof data['updatedAt'] === 'number'
+          ? data['updatedAt']
+          : Date.now(),
+  }
+}
+
 function requireDb(): NonNullable<typeof firebaseDb> {
   if (!firebaseDb || !isFirebaseConfigured) {
     throw {
@@ -77,30 +132,7 @@ export async function getChallenge(
   const snapshot = await getDoc(doc(db, 'challenges', challengeId))
   if (!snapshot.exists()) return null
   const data = snapshot.data()
-  return {
-    id: snapshot.id,
-    citizenId: data.citizenId,
-    title: data.title,
-    description: data.description,
-    domain: data.domain as Domain,
-    tags: data.tags as string[],
-    location: data.location,
-    evidence: data.evidence as string[],
-    status: data.status as ChallengeStatus,
-    assignedUniversityId: data.assignedUniversityId as string | undefined,
-    createdAt:
-      data.createdAt instanceof Timestamp
-        ? data.createdAt.toMillis()
-        : typeof data.createdAt === 'number'
-          ? data.createdAt
-          : Date.now(),
-    updatedAt:
-      data.updatedAt instanceof Timestamp
-        ? data.updatedAt.toMillis()
-        : typeof data.updatedAt === 'number'
-          ? data.updatedAt
-          : Date.now(),
-  }
+  return mapChallengeData(snapshot.id, data)
 }
 
 /**
@@ -118,31 +150,5 @@ export async function getCitizenChallenges(
   )
 
   const snapshot = await getDocs(q)
-  return snapshot.docs.map((d) => {
-    const data = d.data()
-    return {
-      id: d.id,
-      citizenId: data.citizenId,
-      title: data.title,
-      description: data.description,
-      domain: data.domain as Domain,
-      tags: data.tags as string[],
-      location: data.location,
-      evidence: data.evidence as string[],
-      status: data.status as ChallengeStatus,
-      assignedUniversityId: data.assignedUniversityId as string | undefined,
-      createdAt:
-        data.createdAt instanceof Timestamp
-          ? data.createdAt.toMillis()
-          : typeof data.createdAt === 'number'
-            ? data.createdAt
-            : Date.now(),
-      updatedAt:
-        data.updatedAt instanceof Timestamp
-          ? data.updatedAt.toMillis()
-          : typeof data.updatedAt === 'number'
-            ? data.updatedAt
-            : Date.now(),
-    }
-  })
+  return snapshot.docs.map((d) => mapChallengeData(d.id, d.data()))
 }

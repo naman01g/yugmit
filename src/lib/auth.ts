@@ -87,8 +87,36 @@ export async function registerCitizen(email: string, password: string, name: str
     await setDoc(doc(dbInstance, 'users', credential.user.uid), {
       uid: credential.user.uid,
       role: 'citizen',
+      accountStatus: 'approved',
       name: name.trim(),
       email: email.trim(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    return credential.user
+  } catch (error) {
+    throw mapAuthError(error)
+  }
+}
+
+/** Creates a student request. The selected university is only a request until
+ * that university's approved admin changes accountStatus. */
+export async function registerStudent(
+  email: string,
+  password: string,
+  name: string,
+  universityId: string,
+): Promise<FirebaseUser> {
+  const { auth: authInstance, db: dbInstance } = requireFirebase()
+  try {
+    const credential = await createUserWithEmailAndPassword(authInstance, email, password)
+    await setDoc(doc(dbInstance, 'users', credential.user.uid), {
+      uid: credential.user.uid,
+      role: 'student',
+      name: name.trim(),
+      email: email.trim(),
+      universityId,
+      accountStatus: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     })

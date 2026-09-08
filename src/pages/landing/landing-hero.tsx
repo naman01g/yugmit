@@ -17,9 +17,7 @@ export function LandingHero() {
             सामाजिक चुनौतियों का सहयोगी मंच
           </p>
 
-          <h1 className="mt-5 font-heading text-4xl font-semibold tracking-tight text-[var(--landing-ink)] sm:text-5xl md:text-6xl">
-            YUGMIT
-          </h1>
+          <img src="/brand/yugmit-logo.png" alt="YUGMIT — People. Ideas. A Stronger India." className="mx-auto mt-5 h-auto w-full max-w-md object-contain sm:max-w-lg" />
 
           <p
             className="mt-5 font-heading text-2xl font-medium leading-snug text-[var(--landing-ink)] sm:text-3xl"

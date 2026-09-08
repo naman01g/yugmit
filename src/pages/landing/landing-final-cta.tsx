@@ -25,7 +25,7 @@ export function LandingFinalCta() {
             <Button
               size="lg"
               asChild
-              className="w-full bg-[var(--landing-amber)] text-[var(--landing-cream)] hover:bg-[var(--landing-amber-soft)] sm:w-auto"
+              className="w-full bg-[var(--landing-amber)] text-[var(--landing-cream)] hover:bg-[var(--landing-amber-soft)] active:bg-[var(--landing-amber-soft)] sm:w-auto"
             >
               <Link to="/citizen/challenges/new">
                 <span lang="hi" className="font-medium">

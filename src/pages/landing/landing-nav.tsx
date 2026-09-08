@@ -8,9 +8,9 @@ export function LandingNav() {
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <Link
           to="/"
-          className="flex items-baseline gap-2 font-heading text-lg font-semibold tracking-tight text-[var(--landing-ink)]"
+          className="flex items-center"
         >
-          YUGMIT
+          <img src="/brand/yugmit-logo.png" alt="YUGMIT — People. Ideas. A Stronger India." className="h-12 w-auto object-contain sm:h-14" />
         </Link>
 
         <nav aria-label="Section navigation" className="hidden md:block">
@@ -60,7 +60,7 @@ export function LandingNav() {
               </span>
             </Link>
           </Button>
-          <Button size="sm" asChild className="bg-[var(--landing-amber)] text-[var(--landing-cream)] hover:bg-[var(--landing-amber-soft)]">
+          <Button size="sm" asChild className="bg-[var(--landing-amber)] text-[var(--landing-cream)] hover:bg-[var(--landing-amber-soft)] active:bg-[var(--landing-amber-soft)]">
             <Link to="/citizen/challenges/new">
               <span lang="hi">समस्या साझा करें</span>
               <span className="hidden text-xs opacity-80 sm:inline">
